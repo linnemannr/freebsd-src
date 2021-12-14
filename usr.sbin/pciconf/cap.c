@@ -537,7 +537,7 @@ cap_express(int fd, struct pci_conf *p, uint8_t ptr)
 	if ((cap & PCIEM_LINK_CAP_MAX_WIDTH) != 0) {
 		printf(" speed %s(%s)", (sta & PCIEM_LINK_STA_WIDTH) == 0 ?
 		    "0.0" : link_speed_string(sta & PCIEM_LINK_STA_SPEED),
-	    	    link_speed_string(cap & PCIEM_LINK_CAP_MAX_SPEED));
+		    link_speed_string(cap & PCIEM_LINK_CAP_MAX_SPEED));
 	}
 	if ((cap & PCIEM_LINK_CAP_ASPM) != 0) {
 		ctl = read_config(fd, &p->pc_sel, ptr + PCIER_LINK_CTL, 2);
@@ -561,7 +561,7 @@ cap_express(int fd, struct pci_conf *p, uint8_t ptr)
 		printf(" HotPlug(%s)", sta & PCIEM_SLOT_STA_PDS ? "present" :
 		    "empty");
 	if (cap & PCIEM_SLOT_CAP_HPS)
-		printf(" surprise");
+		printf(" Surprise");
 	if (cap & PCIEM_SLOT_CAP_APB)
 		printf(" Attn Button");
 	if (cap & PCIEM_SLOT_CAP_PCP)
