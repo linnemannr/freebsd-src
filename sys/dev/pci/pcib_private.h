@@ -143,10 +143,6 @@ struct pcib_softc
     struct mtx	*pcie_hp_lock;
 };
 
-#define PCIB_HP_LOCK(sc)	mtx_lock((sc)->pcie_hp_lock)
-#define PCIB_HP_UNLOCK(sc)	mtx_unlock((sc)->pcie_hp_lock)
-#define PCIB_HP_LOCK_ASSERT(sc)	mtx_assert((sc)->pcie_hp_lock, MA_OWNED)
-
 #define	PCIB_SUPPORTED_ARI_VER	1
 
 typedef uint32_t pci_read_config_fn(int b, int s, int f, int reg, int width);

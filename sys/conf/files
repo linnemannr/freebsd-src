@@ -2619,6 +2619,7 @@ dev/pci/pci_subr.c		optional pci
 dev/pci/pci_user.c		optional pci
 dev/pci/pcib_if.m		standard
 dev/pci/pcib_support.c		standard
+dev/pci/pcib_hotplug.c		optional pci pci_hp
 dev/pci/vga_pci.c		optional pci
 dev/pms/freebsd/driver/ini/src/agtiapi.c		optional pmspcv \
 	compile-with "${NORMAL_C} -Wunused-variable -Woverflow -Wparentheses -w"
