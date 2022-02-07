@@ -37,7 +37,11 @@
 
 #include <sys/taskqueue.h>
 
+#ifdef PCI_HP
+#include <dev/pci/pcib_hotplug.h>
+#endif
 #ifdef NEW_PCIB
+
 /*
  * Data structure and routines that Host to PCI bridge drivers can use
  * to restrict allocations for child devices to ranges decoded by the
@@ -102,7 +106,7 @@ struct pcib_secbus {
 /*
  * Bridge-specific data.
  */
-struct pcib_softc 
+struct pcib_softc
 {
     device_t	dev;
     device_t	child;
@@ -111,10 +115,9 @@ struct pcib_softc
 #define	PCIB_DISABLE_MSI	0x2
 #define	PCIB_DISABLE_MSIX	0x4
 #define	PCIB_ENABLE_ARI		0x8
-#define	PCIB_HOTPLUG		0x10
-#define	PCIB_HOTPLUG_CMD_PENDING 0x20
-#define	PCIB_DETACH_PENDING	0x40
-#define	PCIB_DETACHING		0x80
+#ifdef PCI_HP
+    struct pcib_hotplug hp;
+#endif
     u_int	domain;		/* domain number */
     u_int	pribus;		/* primary bus number */
     struct pcib_secbus bus;	/* secondary bus numbers */
@@ -136,11 +139,6 @@ struct pcib_softc
     uint32_t	pcie_slot_cap;
     struct resource *pcie_irq;
     void	*pcie_ihand;
-    struct task	pcie_hp_task;
-    struct timeout_task pcie_ab_task;
-    struct timeout_task pcie_cc_task;
-    struct timeout_task pcie_dll_task;
-    struct mtx	*pcie_hp_lock;
 };
 
 #define	PCIB_SUPPORTED_ARI_VER	1
@@ -166,7 +164,7 @@ void		pcib_setup_secbus(device_t dev, struct pcib_secbus *bus,
 int		pcib_attach(device_t dev);
 int		pcib_attach_child(device_t dev);
 void		pcib_attach_common(device_t dev);
-void		pcib_bridge_init(device_t dev);	
+void		pcib_bridge_init(device_t dev);
 #ifdef NEW_PCIB
 const char	*pcib_child_name(device_t child);
 #endif
@@ -174,7 +172,7 @@ int		pcib_child_present(device_t dev, device_t child);
 int		pcib_detach(device_t dev);
 int		pcib_read_ivar(device_t dev, device_t child, int which, uintptr_t *result);
 int		pcib_write_ivar(device_t dev, device_t child, int which, uintptr_t value);
-struct resource *pcib_alloc_resource(device_t dev, device_t child, int type, int *rid, 
+struct resource *pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 					    rman_res_t start, rman_res_t end,
 					    rman_res_t count, u_int flags);
 #ifdef NEW_PCIB
@@ -193,7 +191,7 @@ int		pcib_release_msix(device_t pcib, device_t dev, int irq);
 int		pcib_map_msi(device_t pcib, device_t dev, int irq, uint64_t *addr, uint32_t *data);
 int		pcib_get_id(device_t pcib, device_t dev, enum pci_id_type type,
 		    uintptr_t *id);
-void		pcib_decode_rid(device_t pcib, uint16_t rid, int *bus, 
+void		pcib_decode_rid(device_t pcib, uint16_t rid, int *bus,
 		    int *slot, int *func);
 int		pcib_request_feature(device_t dev, enum pci_feature feature);
 int		pcib_request_feature_allow(device_t pcib, device_t dev, enum pci_feature feature);

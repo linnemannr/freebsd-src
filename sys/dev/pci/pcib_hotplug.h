@@ -36,9 +36,23 @@
 #ifndef __PCIB_HOTPLUG_H__
 #define __PCIB_HOTPLUG_H__
 
-#define PCIB_HP_LOCK(sc)	mtx_lock((sc)->pcie_hp_lock)
-#define PCIB_HP_UNLOCK(sc)	mtx_unlock((sc)->pcie_hp_lock)
-#define PCIB_HP_LOCK_ASSERT(sc)	mtx_assert((sc)->pcie_hp_lock, MA_OWNED)
+#define PCIB_HP_LOCK(sc)	mtx_lock((sc)->hp.pcie_hp_lock)
+#define PCIB_HP_UNLOCK(sc)	mtx_unlock((sc)->hp.pcie_hp_lock)
+#define PCIB_HP_LOCK_ASSERT(sc)	mtx_assert((sc)->hp.pcie_hp_lock, MA_OWNED)
+struct pcib_softc;
+struct pcib_hotplug
+{
+	uint32_t flags;
+#define	PCIB_HOTPLUG_ENABLED	0x1
+#define	PCIB_HOTPLUG_CMD_PENDING 0x10
+#define	PCIB_DETACH_PENDING	0x20
+#define	PCIB_DETACHING		0x40
+	struct task		pcie_hp_task;
+	struct timeout_task	pcie_ab_task;
+	struct timeout_task	pcie_cc_task;
+	struct timeout_task	pcie_dll_task;
+	struct mtx		*pcie_hp_lock;
+};
 
 void	pcib_probe_hotplug(struct pcib_softc *sc);
 void	pcib_setup_hotplug(struct pcib_softc *sc);

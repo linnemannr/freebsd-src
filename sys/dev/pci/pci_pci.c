@@ -1196,8 +1196,7 @@ pcib_attach_common(device_t dev)
 	    pci_release_msi(dev);
     }
 #ifdef PCI_HP
-    if (sc->flags & PCIB_HOTPLUG)
-	    pcib_setup_hotplug(sc);
+    pcib_setup_hotplug(sc);
 #endif
     if (bootverbose) {
 	device_printf(dev, "  domain            %d\n", sc->domain);
@@ -1254,9 +1253,7 @@ pcib_attach_common(device_t dev)
 int
 pcib_present(struct pcib_softc *sc)
 {
-	if (sc->flags & PCIB_HOTPLUG)
-		return (pcib_hotplug_present(sc) != 0);
-	return (1);
+	return (pcib_hotplug_present(sc) != 0);
 }
 #endif
 
@@ -1305,11 +1302,9 @@ pcib_detach(device_t dev)
 	if (error)
 		return (error);
 #ifdef PCI_HP
-	if (sc->flags & PCIB_HOTPLUG) {
-		error = pcib_detach_hotplug(sc);
-		if (error)
-			return (error);
-	}
+	error = pcib_detach_hotplug(sc);
+	if (error)
+		return (error);
 #endif
 	error = device_delete_children(dev);
 	if (error)
@@ -1320,10 +1315,6 @@ pcib_detach(device_t dev)
 	pcib_free_secbus(dev, &sc->bus);
 #endif
 #endif
-
-	/* XXX detach services here? */
-
-	/* XXX check this doesn't balk if we already released the irq */
 	error = pcib_release_pcie_irq(sc);
 	if (error)
 		return (error);
@@ -1375,8 +1366,8 @@ pcib_child_present(device_t dev, device_t child)
 	int retval;
 
 	retval = bus_child_present(dev);
-	if (retval != 0 && sc->flags & PCIB_HOTPLUG)
-		retval = pcib_hotplug_present(sc);
+	if (retval != 0)
+		retval = pcib_hotplug_present(sc) != 0;
 	return (retval);
 #else
 	return (bus_child_present(dev));

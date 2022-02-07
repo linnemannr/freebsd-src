@@ -54,7 +54,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pci_private.h>
 #include <dev/pci/pcib_private.h>
-#include "pcib_hotplug.h"
 
 /*
  * PCI-express HotPlug support.
@@ -120,7 +119,7 @@ pcib_probe_hotplug(struct pcib_softc *sc)
 		return;
 	}
 
-	sc->flags |= PCIB_HOTPLUG;
+	sc->hp.flags |= PCIB_HOTPLUG_ENABLED;
 }
 
 /*
@@ -139,7 +138,7 @@ pcib_pcie_hotplug_command(struct pcib_softc *sc, uint16_t val, uint16_t mask)
 
 	dev = sc->dev;
 
-	if (sc->flags & PCIB_HOTPLUG_CMD_PENDING)
+	if (sc->hp.flags & PCIB_HOTPLUG_CMD_PENDING)
 		return;
 
 	ctl = pcie_read_config(dev, PCIER_SLOT_CTL, 2);
@@ -151,10 +150,10 @@ pcib_pcie_hotplug_command(struct pcib_softc *sc, uint16_t val, uint16_t mask)
 	pcie_write_config(dev, PCIER_SLOT_CTL, new, 2);
 	if (!(sc->pcie_slot_cap & PCIEM_SLOT_CAP_NCCS) &&
 	    (ctl & new) & PCIEM_SLOT_CTL_CCIE) {
-		sc->flags |= PCIB_HOTPLUG_CMD_PENDING;
+		sc->hp.flags |= PCIB_HOTPLUG_CMD_PENDING;
 		if (!cold)
 			taskqueue_enqueue_timeout(taskqueue_pci_hp,
-			    &sc->pcie_cc_task, hz);
+			    &sc->hp.pcie_cc_task, hz);
 	}
 }
 
@@ -167,10 +166,11 @@ pcib_pcie_hotplug_command_completed(struct pcib_softc *sc)
 
 	if (bootverbose)
 		device_printf(dev, "Command Completed\n");
-	if (!(sc->flags & PCIB_HOTPLUG_CMD_PENDING))
+	if (!(sc->hp.flags & PCIB_HOTPLUG_CMD_PENDING))
 		return;
-	taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->pcie_cc_task, NULL);
-	sc->flags &= ~PCIB_HOTPLUG_CMD_PENDING;
+	taskqueue_cancel_timeout(taskqueue_pci_hp,
+	    &sc->hp.pcie_cc_task, NULL);
+	sc->hp.flags &= ~PCIB_HOTPLUG_CMD_PENDING;
 	wakeup(sc);
 }
 
@@ -184,7 +184,7 @@ pcib_hotplug_inserted(struct pcib_softc *sc)
 {
 
 	/* Pretend the card isn't present if a detach is forced. */
-	if (sc->flags & PCIB_DETACHING)
+	if (sc->hp.flags & PCIB_DETACHING)
 		return (false);
 
 	/* Card must be present in the slot. */
@@ -205,11 +205,13 @@ pcib_hotplug_inserted(struct pcib_softc *sc)
 
 /*
  * Returns -1 if the card is fully inserted, powered, and ready for
- * access.  Otherwise, returns 0.
+ * access. Otherwise, returns 0.
  */
 int
 pcib_hotplug_present(struct pcib_softc *sc)
 {
+	if (!(sc->hp.flags & PCIB_HOTPLUG_ENABLED))
+		return 0;
 
 	/* Card must be inserted. */
 	if (!pcib_hotplug_inserted(sc))
@@ -231,7 +233,7 @@ pcib_pcie_hotplug_update(struct pcib_softc *sc, uint16_t val, uint16_t mask,
 	/* Clear DETACHING if Presence Detect has cleared. */
 	if ((sc->pcie_slot_sta & (PCIEM_SLOT_STA_PDC | PCIEM_SLOT_STA_PDS)) ==
 	    PCIEM_SLOT_STA_PDC)
-		sc->flags &= ~PCIB_DETACHING;
+		sc->hp.flags &= ~PCIB_DETACHING;
 
 	card_inserted = pcib_hotplug_inserted(sc);
 
@@ -240,7 +242,7 @@ pcib_pcie_hotplug_update(struct pcib_softc *sc, uint16_t val, uint16_t mask,
 		mask |= PCIEM_SLOT_CTL_PIC;
 		if (card_inserted)
 			val |= PCIEM_SLOT_CTL_PI_ON;
-		else if (sc->flags & PCIB_DETACH_PENDING)
+		else if (sc->hp.flags & PCIB_DETACH_PENDING)
 			val |= PCIEM_SLOT_CTL_PI_BLINK;
 		else
 			val |= PCIEM_SLOT_CTL_PI_OFF;
@@ -283,9 +285,9 @@ pcib_pcie_hotplug_update(struct pcib_softc *sc, uint16_t val, uint16_t mask,
 			    "Data Link Layer inactive\n");
 		else
 			taskqueue_enqueue_timeout(taskqueue_pci_hp,
-			    &sc->pcie_dll_task, hz);
+			    &sc->hp.pcie_dll_task, hz);
 	} else if (sc->pcie_link_sta & PCIEM_LINK_STA_DL_ACTIVE)
-		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->pcie_dll_task,
+		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->hp.pcie_dll_task,
 		    NULL);
 
 	pcib_pcie_hotplug_command(sc, val, mask);
@@ -297,7 +299,7 @@ pcib_pcie_hotplug_update(struct pcib_softc *sc, uint16_t val, uint16_t mask,
 	 */
 	if (schedule_task &&
 	    (pcib_hotplug_present(sc) != 0) != (sc->child != NULL))
-		taskqueue_enqueue(taskqueue_pci_hp, &sc->pcie_hp_task);
+		taskqueue_enqueue(taskqueue_pci_hp, &sc->hp.pcie_hp_task);
 }
 
 void
@@ -305,6 +307,9 @@ pcib_pcie_intr_hotplug(struct pcib_softc *sc)
 {
 	device_t dev;
 	uint16_t old_slot_sta;
+
+	if (!(sc->hp.flags & PCIB_HOTPLUG_ENABLED))
+		return;
 
 	dev = sc->dev;
 	PCIB_HP_LOCK(sc);
@@ -319,19 +324,19 @@ pcib_pcie_intr_hotplug(struct pcib_softc *sc)
 		    sc->pcie_slot_sta);
 
 	if (sc->pcie_slot_sta & PCIEM_SLOT_STA_ABP) {
-		if (sc->flags & PCIB_DETACH_PENDING) {
+		if (sc->hp.flags & PCIB_DETACH_PENDING) {
 			device_printf(dev,
 			    "Attention Button Pressed: Detach Cancelled\n");
-			sc->flags &= ~PCIB_DETACH_PENDING;
+			sc->hp.flags &= ~PCIB_DETACH_PENDING;
 			taskqueue_cancel_timeout(taskqueue_pci_hp,
-			    &sc->pcie_ab_task, NULL);
+			    &sc->hp.pcie_ab_task, NULL);
 		} else if (old_slot_sta & PCIEM_SLOT_STA_PDS) {
 			/* Only initiate detach sequence if device present. */
 			device_printf(dev,
 		    "Attention Button Pressed: Detaching in 5 seconds\n");
-			sc->flags |= PCIB_DETACH_PENDING;
+			sc->hp.flags |= PCIB_DETACH_PENDING;
 			taskqueue_enqueue_timeout(taskqueue_pci_hp,
-			    &sc->pcie_ab_task, 5 * hz);
+			    &sc->hp.pcie_ab_task, 5 * hz);
 		}
 	}
 	if (sc->pcie_slot_sta & PCIEM_SLOT_STA_PFD)
@@ -387,9 +392,9 @@ pcib_pcie_ab_timeout(void *arg, int pending)
 	struct pcib_softc *sc = arg;
 
 	PCIB_HP_LOCK(sc);
-	if (sc->flags & PCIB_DETACH_PENDING) {
-		sc->flags |= PCIB_DETACHING;
-		sc->flags &= ~PCIB_DETACH_PENDING;
+	if (sc->hp.flags & PCIB_DETACH_PENDING) {
+		sc->hp.flags |= PCIB_DETACHING;
+		sc->hp.flags &= ~PCIB_DETACH_PENDING;
 	}
 	PCIB_HP_UNLOCK(sc);
 }
@@ -405,7 +410,7 @@ pcib_pcie_cc_timeout(void *arg, int pending)
 	sta = pcie_read_config(dev, PCIER_SLOT_STA, 2);
 	if (!(sta & PCIEM_SLOT_STA_CC)) {
 		device_printf(dev, "HotPlug Command Timed Out\n");
-		sc->flags &= ~PCIB_HOTPLUG_CMD_PENDING;
+		sc->hp.flags &= ~PCIB_HOTPLUG_CMD_PENDING;
 	} else {
 		device_printf(dev,
 	    "Missed HotPlug interrupt waiting for Command Completion\n");
@@ -426,7 +431,7 @@ pcib_pcie_dll_timeout(void *arg, int pending)
 	if (!(sta & PCIEM_LINK_STA_DL_ACTIVE)) {
 		device_printf(dev,
 		    "Timed out waiting for Data Link Layer Active\n");
-		sc->flags |= PCIB_DETACHING;
+		sc->hp.flags |= PCIB_DETACHING;
 		pcib_pcie_hotplug_update(sc, 0, 0, true);
 	} else if (sta != sc->pcie_link_sta) {
 		device_printf(dev,
@@ -441,15 +446,18 @@ pcib_setup_hotplug(struct pcib_softc *sc)
 	device_t dev;
 	uint16_t mask, val;
 
+	if (!(sc->hp.flags & PCIB_HOTPLUG_ENABLED))
+		return;
+
 	dev = sc->dev;
-	TASK_INIT(&sc->pcie_hp_task, 0, pcib_pcie_hotplug_task, sc);
-	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->pcie_ab_task, 0,
+	TASK_INIT(&sc->hp.pcie_hp_task, 0, pcib_pcie_hotplug_task, sc);
+	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->hp.pcie_ab_task, 0,
 	    pcib_pcie_ab_timeout, sc);
-	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->pcie_cc_task, 0,
+	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->hp.pcie_cc_task, 0,
 	    pcib_pcie_cc_timeout, sc);
-	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->pcie_dll_task, 0,
+	TIMEOUT_TASK_INIT(taskqueue_pci_hp, &sc->hp.pcie_dll_task, 0,
 	    pcib_pcie_dll_timeout, sc);
-	sc->pcie_hp_lock = &Giant;
+	sc->hp.pcie_hp_lock = &Giant;
 	sc->pcie_link_sta = pcie_read_config(dev, PCIER_LINK_STA, 2);
 	sc->pcie_slot_sta = pcie_read_config(dev, PCIER_SLOT_STA, 2);
 
@@ -484,19 +492,22 @@ pcib_detach_hotplug(struct pcib_softc *sc)
 {
 	uint16_t mask, val;
 
+	if (!(sc->hp.flags & PCIB_HOTPLUG_ENABLED))
+		return 0;
+
 	/* Disable the card in the slot and force it to detach. */
-	if (sc->flags & PCIB_DETACH_PENDING) {
-		sc->flags &= ~PCIB_DETACH_PENDING;
-		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->pcie_ab_task,
+	if (sc->hp.flags & PCIB_DETACH_PENDING) {
+		sc->hp.flags &= ~PCIB_DETACH_PENDING;
+		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->hp.pcie_ab_task,
 		    NULL);
 	}
-	sc->flags |= PCIB_DETACHING;
+	sc->hp.flags |= PCIB_DETACHING;
 
-	if (sc->flags & PCIB_HOTPLUG_CMD_PENDING) {
-		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->pcie_cc_task,
+	if (sc->hp.flags & PCIB_HOTPLUG_CMD_PENDING) {
+		taskqueue_cancel_timeout(taskqueue_pci_hp, &sc->hp.pcie_cc_task,
 		    NULL);
 		tsleep(sc, 0, "hpcmd", hz);
-		sc->flags &= ~PCIB_HOTPLUG_CMD_PENDING;
+		sc->hp.flags &= ~PCIB_HOTPLUG_CMD_PENDING;
 	}
 
 	/* Disable HotPlug events. */
@@ -513,9 +524,9 @@ pcib_detach_hotplug(struct pcib_softc *sc)
 
 	pcib_pcie_hotplug_update(sc, val, mask, false);
 
-	taskqueue_drain(taskqueue_pci_hp, &sc->pcie_hp_task);
-	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->pcie_ab_task);
-	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->pcie_cc_task);
-	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->pcie_dll_task);
+	taskqueue_drain(taskqueue_pci_hp, &sc->hp.pcie_hp_task);
+	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->hp.pcie_ab_task);
+	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->hp.pcie_cc_task);
+	taskqueue_drain_timeout(taskqueue_pci_hp, &sc->hp.pcie_dll_task);
 	return (0);
 }
